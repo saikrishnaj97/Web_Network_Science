@@ -1,0 +1,113 @@
+---
+title: "Practical 11. Regression, prediction and assumption checking"
+author: "Saikrishna Javvadi"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(igraph)
+dd <- read.table("Ythan_Estuary.txt")
+gg <- graph_from_data_frame(dd, directed=TRUE)
+gg_layout <- layout_as_tree(gg, flip.y=F)
+# The par function is not part of the graph plot. It just controls the margin that the igraph plot function generates
+par(mar=c(0,0,0,0))
+
+plot(gg, 
+     layout=gg_layout,
+     vertex.color= rgb(1,0.87,0, 0.3), # rgb for golden yellow, with 0.3 transparency
+     vertex.size=12, 
+     vertex.frame.colour="gray", 
+     vertex.label.color="black", 
+     vertex.label.cex=0.5, 
+     vertex.label.dist=0, 
+     edge.curved=0.2,
+     edge.arrow.size=0.3,
+     edge.color= rgb(0.5,0.5,0.5, 0.2)) # rgb for grey, with 0.3 transparency
+
+dgCmat<- as_adjacency_matrix(gg)
+
+# adjacency matrix
+gg_mat <- as.matrix(dgCmat)
+
+library(knitr)
+library(kableExtra)
+
+
+g_mat_df <-as.data.frame(gg_mat)
+g_mat_df %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
+#g_mat_df$is_basal<-colSums(g_mat_df<1)
+#g_mat_df$is_top<-rowSums(g_mat_df<1)
+#df_y$is_intermediate<-rowSums(df_y<=50)
+
+
+is_basal_fn<- function(x)
+{
+  ifelse(sum(x)>0,0,1)
+}
+g_mat_df$is_basal<- apply(g_mat_df,2,is_basal_fn)
+basal_species<-length(which(g_mat_df$is_basal!= 0))
+
+#-----------------------
+
+is_top_fn<- function(x)
+{
+  ifelse(sum(x)>0,0,1)
+}
+g_mat_df$is_top<- apply(g_mat_df,1,is_top_fn)
+top_species<-length(which(g_mat_df$is_top!= 0))
+
+#----------------------
+
+intermediate_species<- nrow(g_mat_df)-basal_species-top_species
+
+#Ratio of prey to predators
+ratio <- (basal_species+intermediate_species)/(intermediate_species+top_species)
+
+#species richness
+nrow(g_mat_df)
+
+
+g_mat_df2 <-as.data.frame(gg_mat)
+g_mat_df2 %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+#The number of links between species
+has_link<- apply(g_mat_df2, 1, function(row) any(row > 0))
+num_of_links <- length(which(has_link))
+
+#Connectance
+connectance <- (num_of_links)/(nrow(g_mat_df2)/(nrow(g_mat_df2)-1))
+
+#cannibal species
+sum(diag(gg_mat))
+
+####
+max_species<- function(x)
+{
+  sum(x)
+}
+a<-apply(g_mat_df2,2,max_species)
+max(a)
+mean(a)
+
+
+prey_one_species_fn<- function(x)
+{
+  ifelse(sum(x)==1,1,0)
+}
+g_mat_df2$prey_one_species<- apply(g_mat_df2,2,prey_one_species_fn)
+prey_one_species_num<-length(which(g_mat_df2$prey_one_species!= 0))
+
+```
+
+

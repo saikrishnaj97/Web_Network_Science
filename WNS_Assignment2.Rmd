@@ -1,0 +1,101 @@
+---
+title: "WNS_Assignment2"
+author: "Saikrishna_Javvadi"
+date: "23/02/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(igraph)
+library(purrr)
+
+#reading the file into a dataframe, the values are '' seperated and there's no header for the file
+df <- read.csv("Ythan_Estuary.txt",sep='',header = FALSE)
+
+# now I create the graph object specifying the constraints
+#g <- graph_from_data_frame(data, directed=T)
+
+#creating a matrix from the dataframe columns by binding them using rbind into 2 rows of matrix
+matrix1 <- rbind(df[[1]],df[[2]])
+#creating a vector to feed into the make_graph function in next step
+vec <- c(matrix1)
+
+#making a graph from the vector above using the igraph make_graph function
+#Also since the vertex with "0" was throwing "invalid(negative) vertex id error", I increased the numbering of nodes by 1 to avoid this
+graph_data <- make_graph(vec+1)
+
+#I plotted the above graph data to see if I can get any meaningful insights, but since the nodes were densely connected, 
+#there was nothing that I could infer from the plot
+par(mar=c(0,0,0,0))
+plot(graph_data)
+
+```
+
+```{r}
+#Below are two different in which that I figured which can find out the scc nodes
+
+#Method1
+#Reference:https://stackoverflow.com/questions/55091438/r-igraph-find-all-cycles/55094319
+#To find a cycle, we can consider starting at some node, and then go to some neighboring node of that node ,
+#and then find a simple path back to the original node, which is implemented in the below code
+scc <- NULL
+for(vertex1 in V(graph_data)) {
+  for(vertex2 in neighbors(graph_data, vertex1, mode="out")) {
+   scc <- c(scc, map(all_simple_paths(graph_data, vertex2,vertex1, mode="out"), function(x) c(vertex1,x)))
+               
+  }
+}
+
+#Finding the scc(Strongly connected component nodes)
+scc_nodes <- unique(unlist(scc))
+scc_nodes
+
+#Method2
+#The components function helps us find the strongly connected components of a graph.
+comps <- components(graph_data, mode="strong" )
+#Printing the components vector , we can observe only one strongly connected component of size 2 , all the remaining are of size 1
+comps
+#finding out at which index in the vector does the scc occur
+scc_index <- which.max(comps$csize)
+#Finding the nodes that form the scc
+scc_nodes<-groups(comps)[scc_index]
+scc_nodes<-unlist(scc_nodes, use.names=FALSE)
+scc_nodes
+
+```
+
+```{r}
+#By definition, in-component is nodes that could reach the SCC by following links, but not reachable from the SCC
+#Here I'm using the distances function of igraph and finding out all the nodes in graph that are directeted towards the scc_node
+#For all the nodes that are not directed towards the scc_node, the distance is infinity
+in_comp <- distances(graph_data,V(graph_data)[90],V(graph_data),mode='in')
+#Excluding the nodes with Inf(Infinity) as the distance as they are not connected/directed to the scc_node
+in_comp_nodes <- which(in_comp!=Inf,arr.ind = TRUE)
+#Getting only the nodes from above
+in_comp_nodes <- in_comp_nodes[,'col']
+#filtering out in_components nodes only by excluding scc_nodes, also since we increased the node nuumbers by one above, decreasing it here by 1
+in_comp_nodes <- in_comp_nodes[!in_comp_nodes %in% scc_nodes]-1
+in_comp_nodes
+
+```
+
+```{r}
+#By definition, out-component is the nodes that are reachable from the SCC by following links, but unable to reach the scc
+#Here similar to above,I'm using the distances function of igraph and finding out all the nodes in graph that are directeted outwards from the scc_node
+#For all the nodes that are not directed outwards from the scc_node, the distance is infinity
+out_comp <- distances(graph_data,V(graph_data)[90],V(graph_data),mode='out')
+#Excluding the nodes with Inf(Infinity) as the distance as they are not connected/directed from the scc_node
+out_comp_nodes <- which(out_comp!=Inf,arr.ind = TRUE)
+#Getting only the nodes from above
+out_comp_nodes <- out_comp_nodes[,'col']
+#filtering out out_components nodes only by excluding scc_nodes, also since we increased the node nuumbers by one above, decreasing it here by 1
+out_comp_nodes <- out_comp_nodes[!out_comp_nodes %in% scc_nodes]-1
+out_comp_nodes
+```
+
