@@ -1,0 +1,505 @@
+---
+title: "Web and Network Science Assignment4"
+author: "Saikrishna_Javvadi"
+date: "31/03/2021"
+output:
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+In this assignment I would be implementing Kleinberg’s small world model based on random edge assignment probability d(v,w)−q with q=2 and to evaluate whether it has an effect on
+the shortest paths found using distributed search and then I will also be implementing and examining  the Watts-Strogtaz Small World model i.e q=0 outlined in the lectures.Also one important note that is to be made is self loops aren't allowed while rewiring and edge.
+
+# Experiment
+Firstly , A regular lattice was created which is then converted to 
+- a small world using Kleinberg's method in which he tells that each random edge is generated with a probability inversely related to distance, controlled by a clustering exponent q. i.e if d(v,w) denotes the number of grid steps between two nodes v and w (e.g. manhattan distance), then a random edge out of v to w is generated with probability proportional to d(v,w)^-q, where q=2.
+- a small world according to the Watts Strogtaz model (Kleinberg model at q= 0), using only the rewiring parameter beta.
+
+Then we  compare the short path lengths found using a distributed search approach in the above two scenarios. As a comparative measure of shortest path length we are calculating the APLDC/APL where APLDC is average path length using a decentralised search and APL is the standard average path length (based on shortest path). To calculate the standard average path length, Manhattan distance was used to calculate distance between any node a and b in Kleinberg's method , while millgram search method was used to calculate average path length using a decentralised search.
+
+Also we need to run this experiment more than once, if we were to arrive at strong conclusions as there are many random factors impacting the average path length in various runs. However this is not being carried out here.
+
+#Creating Regular lattice
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(igraph)
+
+# the dimension of the lattice (e.g. it will be a length x length lattice)
+length<-10
+
+# This creates a circular lattice of specified length
+lat <- make_lattice( c(length,length),  directed = TRUE,mutual = TRUE, circular = T )
+index=0
+
+# each node has a location on the grid given by an i,j vector
+for (i in 1:length) {
+  for (j in 1:length) {
+    index<-index+1
+    V(lat)[index]$name<-index
+    V(lat)[index]$locname<-paste0(j,",",i)
+    V(lat)[index]$location<-list(c(j,i))
+  }
+}
+
+apl_lattice<- mean_distance(lat, directed = TRUE)
+par(mar=c(0,0,3,0))
+plot(lat, layout=layout_on_grid(lat), vertex.size=10,vertex.label.cex=1.2, vertex.color="#FFD70099",vertex.frame.color="grey", edge.color="lightgrey", edge.width=0.5, edge.arrow.size=0.6, edge.arrow.width=0.7, main=paste0(length, "x", length," Lattice",  "; Average path length = ", round(apl_lattice,1) ))
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Function to calculate manhattan distance
+manhattan<- function(v1,v2){
+  a<-unlist(v1$location)
+  b<-unlist(v2$location)
+  dx = min(abs(a[1]-b[1]),length-abs(a[1]-b[1]))
+  dy = min(abs(a[2]-b[2]), length-abs(a[2]-b[2]));
+  return(dx+dy)
+}
+```
+
+#Kleinberg’s small world model (q=2)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Reference: Slide 46 of Small world Lecture notes
+#Kleinberg’s small world model that considers clustering component q
+
+Kleinberg_model <- function(q,lat){
+#iterating through each node Vi
+for(Vi in V(lat)){
+  #Iterating through each neighbor of Vi
+  for(Vj in V(lat)[lat[Vi]==1]){
+    #choosing one random number between 1 to 100
+    Vk <-sample(1:100,1)
+    #checking if the rewiring creates loops or multiple edges between Vi, Vk in the graph
+    if( (Vk != Vi) & (Vk != Vj)  & !lat[Vi,Vk])
+    {
+        #calculates distance between vi and vk
+        distance <- manhattan(V(lat)[Vi],V(lat)[Vk])
+        #calculating the rewiring probability beta from the manhattan distance
+        K = (1/log(length(V(lat))))
+        prob <- K * (1/(distance^q))
+        #Rewiring edge(Vi, Vj) with probability beta
+        if(sample(c(0,1),size=1,prob=c(1-prob,prob)))
+        {
+          #deleting existing edge from the network
+          lat[Vi,Vj]<-0
+          #adding a new edge to the network
+          lat[Vi,Vk]<-1
+        }
+    }
+  }
+}
+  return(lat)
+}
+
+Kleinberg_small_world<- Kleinberg_model(2,lat)
+
+apl<-mean_distance(Kleinberg_small_world, directed = TRUE)
+
+
+#plotting small world network created with q=2
+par(mar=c(0,0,3,0))
+plot(Kleinberg_small_world, layout=layout_on_grid(Kleinberg_small_world), vertex.size=10,vertex.label.cex=1.2, vertex.color="#FFD70099",vertex.frame.color="grey",
+     edge.color="lightgrey", edge.width=0.5, edge.arrow.size=0.6, edge.arrow.width=0.7, 
+     main=paste0(length, "x", length," reqired Lattice",  "; Average path length = ", round(apl,1) ))
+```
+#Millgram Search function
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#millgram search function
+millgram_search <- function(g, s, t, path){
+
+  source<-V(g)[s]
+  target<-V(g)[t]
+
+  if(source$name==target$name){
+    return (path)
+  }
+  neighbours <- neighbors(g, source, mode = "out")
+
+  # if some neighbours have been previously considered remove them
+  neighbours<- neighbours [! neighbours %in% path]
+
+  # if the node has no further neighbours that can be considered
+  # return the path
+  if(length(neighbours)==0){
+    return (path)
+  }
+
+  # calculate neighbour nearest to target
+  dist=Inf
+  closest_neighb = NULL
+
+  # Now check each of the neighbour's distance to the target
+  for(i in 1:length(neighbours)){
+
+    # First check if any the neighbours are the target node
+    # if one matches, then return the function with the path
+    if(neighbours[i]$name==target$name){
+      path<-c(path,target$name)
+      return (path)
+    }
+
+    # get the topographical distance between the neigbour and the target
+    # choose the neighbour that is closest to the target
+    dist1<-manhattan(target,neighbours[i])
+    if (dist1<dist){
+      dist<-dist1
+      closest_neighbour<-neighbours[i]
+    }
+  }
+  # update the path with the neighbour closest to the target
+  path<-c(path,closest_neighbour$name)
+
+  # call the function on the neighbour that is closest to the target
+  # this is a recursive call
+  return (millgram_search(g,closest_neighbour$name,target, path))
+}
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#Function that returns all the distances in the network calculated using decentralised search
+#which is then used to calculate apldc
+apldc_fn <- function(model){
+
+   
+#calculating APLDC for small world network
+max_distance <- NULL
+  
+N <-vcount(model)
+  
+# vector to hold path distance between each pair of vertices in the network
+# we will average these values in the end
+distances <- NULL
+
+#use millgram_search to return a path between each pair of nodes in the network
+
+for(i in 1: N){
+  for(j in N : 1){
+    if(i!=j){
+      # each path starts with the source.
+      # This is directed network so this section calculates paths firstly between i and j; then it calculates path between j and i
+      path1<-millgram_search(model,i,j, path=c(i))
+      # check if path1 ends in the target; if it does, add the path distance to the distances vector.
+      # if the path doesn't end in the target then the target wasn't found and I don't include it in the distances vector
+      if(path1[length(path1)]==j){
+        distances<-c(distances,length(path1)-1)
+        # check to see if the distance (of the path) is greater than the previous max_distance. update max_distance if it is.
+        if(length(path1)>length(max_distance)){
+          max_distance<-path1
+        }
+      }
+
+      # This section now calculates paths between j and i
+      path2<-millgram_search(model,j,i, path=c(j))
+      # check if path1 ends in the target; if it does, add its distance to the distances vector. Same procedure as above
+      if(path2[length(path2)]==i){
+        distances<-c(distances,length(path2)-1)
+        if(length(path2)>length(max_distance)){
+          max_distance<-path2
+        }
+      }
+    }
+  }
+}
+return(distances)
+}
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+distances <- apldc_fn(Kleinberg_small_world)
+#calculating APLDC
+apldc<- mean(distances)
+
+cat("average path length using distributed search of ", length, " by ", length,  " small world (q = ", 2, ") : ", round(apldc, 2))
+
+cat("APLDC/APL values is ",apldc/apl)
+```
+#Watts Strogtaz Model (q=0)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#function to return rewired lattice and the average path length of the rewired lattice
+watts_strogtaz_model<- function(beta)
+{
+  set.seed(128)
+  
+  #rewiring the lattice with a probaility beta
+  lat_rewire<- rewire(lat, each_edge(p = beta, loops = FALSE))
+
+  # the average path length of the rewired lattice
+  apl_ws<-mean_distance(lat_rewire, directed = TRUE)
+
+  return(list("lat_rewire"=lat_rewire,"apl_ws"=apl_ws))
+}
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+a <- watts_strogtaz_model(0.05)
+
+lat_rewire <- a$lat_rewire
+apl_ws <- a$apl_ws
+
+cat("average path length of ", length, " by ", length,  " small world (beta = ", 0.05 , ") : ", round(apl, 2))
+  par(mar=c(0,0,3,0))
+  plot(lat_rewire, layout=layout_on_grid(lat_rewire), vertex.size=10,vertex.label.cex=1.2, 
+       vertex.color="#FFD70099",vertex.frame.color="grey", edge.color="lightgrey", edge.width=0.5,
+       edge.arrow.size=0.6, edge.arrow.width=0.7,
+       main=paste0(length, "x", length," Lattice rewired with beta=",0.05,  "; Average path length = ", round(apl_ws,1) ))
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+distances_ws <- apldc_fn(Kleinberg_small_world)
+#calculating APLDC
+apldc_ws<- mean(distances_ws)
+
+cat("average path length using distributed search of ", length, " by ", length,  " small world (beta = ", 0.05, ") : ", round(apldc_ws, 2))
+
+cat("APLDC/APL values is ",apldc_ws/apl_ws)
+```
+# Interpretation of the results
+
+We can observe that the APLDC/APL ratio for Kleinberg’s Model is  1.08 which is relatively less compared to all other APLDC/APL ratios for Watts Strogatz models for different beta values.
+By this we can infer that when q is very small i.e '0' in our case, the long range links are just too random like we have seen for the Watts Strogatz model. When q is large, the long range links are not random enough. In other words, we're simply creating lots of local connections which don't help us at all. So the idea is that there is a value of q which gives us links of intermediate range, which, which Kleinberg hypothesized should help in the distributed search approach.  So a value of 2 for q enables these intermediate links that facilitates efficient distributed search. So can we see this effect on small-world model constructed using the Kleinberg approach and show that distributed search is more efficient than we have observed with the standard small-world model.
+
+# Real world application
+One of the application that I can think of employing distributed search is search engine, where thousands of users enter their queries on the search engine . Using distributed search here will allow for an effective search. 
+
+# Appendix 
+```{r, eval=FALSE}
+
+library(igraph)
+
+# the dimension of the lattice (e.g. it will be a length x length lattice)
+length<-10
+
+# This creates a circular lattice of specified length
+lat <- make_lattice( c(length,length),  directed = TRUE,mutual = TRUE, circular = T )
+index=0
+
+# each node has a location on the grid given by an i,j vector
+for (i in 1:length) {
+  for (j in 1:length) {
+    index<-index+1
+    V(lat)[index]$name<-index
+    V(lat)[index]$locname<-paste0(j,",",i)
+    V(lat)[index]$location<-list(c(j,i))
+  }
+}
+
+apl_lattice<- mean_distance(lat, directed = TRUE)
+par(mar=c(0,0,3,0))
+plot(lat, layout=layout_on_grid(lat), vertex.size=10,vertex.label.cex=1.2, vertex.color="#FFD70099",vertex.frame.color="grey", edge.color="lightgrey", edge.width=0.5, edge.arrow.size=0.6, edge.arrow.width=0.7, main=paste0(length, "x", length," Lattice",  "; Average path length = ", round(apl_lattice,1) ))
+
+# Function to calculate manhattan distance
+manhattan<- function(v1,v2){
+  a<-unlist(v1$location)
+  b<-unlist(v2$location)
+  dx = min(abs(a[1]-b[1]),length-abs(a[1]-b[1]))
+  dy = min(abs(a[2]-b[2]), length-abs(a[2]-b[2]));
+  return(dx+dy)
+}
+
+#Kleinberg’s small world model (q=2)
+
+#Reference: Slide 46 of Small world Lecture notes
+#Kleinberg’s small world model that considers clustering component q
+
+Kleinberg_model <- function(q,lat){
+#iterating through each node Vi
+for(Vi in V(lat)){
+  #Iterating through each neighbor of Vi
+  for(Vj in V(lat)[lat[Vi]==1]){
+    #choosing one random number between 1 to 100
+    Vk <-sample(1:100,1)
+    #checking if the rewiring creates loops or multiple edges between Vi, Vk in the graph
+    if( (Vk != Vi) & (Vk != Vj)  & !lat[Vi,Vk])
+    {
+        #calculates distance between vi and vk
+        distance <- manhattan(V(lat)[Vi],V(lat)[Vk])
+        #calculating the rewiring probability beta from the manhattan distance
+        K = (1/log(length(V(lat))))
+        prob <- K * (1/(distance^q))
+        #Rewiring edge(Vi, Vj) with probability beta
+        if(sample(c(0,1),size=1,prob=c(1-prob,prob)))
+        {
+          #deleting existing edge from the network
+          lat[Vi,Vj]<-0
+          #adding a new edge to the network
+          lat[Vi,Vk]<-1
+        }
+    }
+  }
+}
+  return(lat)
+}
+
+Kleinberg_small_world<- Kleinberg_model(2,lat)
+
+apl<-mean_distance(Kleinberg_small_world, directed = TRUE)
+
+
+#plotting small world network created with q=2
+par(mar=c(0,0,3,0))
+plot(Kleinberg_small_world, layout=layout_on_grid(Kleinberg_small_world), vertex.size=10,vertex.label.cex=1.2, vertex.color="#FFD70099",vertex.frame.color="grey",
+     edge.color="lightgrey", edge.width=0.5, edge.arrow.size=0.6, edge.arrow.width=0.7, 
+     main=paste0(length, "x", length," reqired Lattice",  "; Average path length = ", round(apl,1) ))
+
+
+#millgram search function
+millgram_search <- function(g, s, t, path){
+
+  source<-V(g)[s]
+  target<-V(g)[t]
+
+  if(source$name==target$name){
+    return (path)
+  }
+  neighbours <- neighbors(g, source, mode = "out")
+
+  # if some neighbours have been previously considered remove them
+  neighbours<- neighbours [! neighbours %in% path]
+
+  # if the node has no further neighbours that can be considered
+  # return the path
+  if(length(neighbours)==0){
+    return (path)
+  }
+
+  # calculate neighbour nearest to target
+  dist=Inf
+  closest_neighb = NULL
+
+  # Now check each of the neighbour's distance to the target
+  for(i in 1:length(neighbours)){
+
+    # First check if any the neighbours are the target node
+    # if one matches, then return the function with the path
+    if(neighbours[i]$name==target$name){
+      path<-c(path,target$name)
+      return (path)
+    }
+
+    # get the topographical distance between the neigbour and the target
+    # choose the neighbour that is closest to the target
+    dist1<-manhattan(target,neighbours[i])
+    if (dist1<dist){
+      dist<-dist1
+      closest_neighbour<-neighbours[i]
+    }
+  }
+  # update the path with the neighbour closest to the target
+  path<-c(path,closest_neighbour$name)
+
+  # call the function on the neighbour that is closest to the target
+  # this is a recursive call
+  return (millgram_search(g,closest_neighbour$name,target, path))
+}
+
+
+#Function that returns all the distances in the network calculated using decentralised search
+#which is then used to calculate apldc
+apldc_fn <- function(model){
+
+   
+#calculating APLDC for small world network
+max_distance <- NULL
+  
+N <-vcount(model)
+  
+# vector to hold path distance between each pair of vertices in the network
+# we will average these values in the end
+distances <- NULL
+
+#use millgram_search to return a path between each pair of nodes in the network
+
+for(i in 1: N){
+  for(j in N : 1){
+    if(i!=j){
+      # each path starts with the source.
+      # This is directed network so this section calculates paths firstly between i and j; then it calculates path between j and i
+      path1<-millgram_search(model,i,j, path=c(i))
+      # check if path1 ends in the target; if it does, add the path distance to the distances vector.
+      # if the path doesn't end in the target then the target wasn't found and I don't include it in the distances vector
+      if(path1[length(path1)]==j){
+        distances<-c(distances,length(path1)-1)
+        # check to see if the distance (of the path) is greater than the previous max_distance. update max_distance if it is.
+        if(length(path1)>length(max_distance)){
+          max_distance<-path1
+        }
+      }
+
+      # This section now calculates paths between j and i
+      path2<-millgram_search(model,j,i, path=c(j))
+      # check if path1 ends in the target; if it does, add its distance to the distances vector. Same procedure as above
+      if(path2[length(path2)]==i){
+        distances<-c(distances,length(path2)-1)
+        if(length(path2)>length(max_distance)){
+          max_distance<-path2
+        }
+      }
+    }
+  }
+}
+return(distances)
+}
+
+distances <- apldc_fn(Kleinberg_small_world)
+#calculating APLDC
+apldc<- mean(distances)
+
+cat("average path length using distributed search of ", length, " by ", length,  " small world (q = ", 2, ") : ", round(apldc, 2))
+
+cat("APLDC/APL values is ",apldc/apl)
+
+
+#Watts Strogtaz Model (q=0)
+
+#function to return rewired lattice and the average path length of the rewired lattice
+watts_strogtaz_model<- function(beta)
+{
+  set.seed(128)
+  
+  #rewiring the lattice with a probaility beta
+  lat_rewire<- rewire(lat, each_edge(p = beta, loops = FALSE))
+
+  # the average path length of the rewired lattice
+  apl_ws<-mean_distance(lat_rewire, directed = TRUE)
+
+  return(list("lat_rewire"=lat_rewire,"apl_ws"=apl_ws))
+}
+
+a <- watts_strogtaz_model(0.05)
+
+lat_rewire <- a$lat_rewire
+apl_ws <- a$apl_ws
+
+cat("average path length of ", length, " by ", length,  " small world (beta = ", 0.05 , ") : ", round(apl, 2))
+  par(mar=c(0,0,3,0))
+  plot(lat_rewire, layout=layout_on_grid(lat_rewire), vertex.size=10,vertex.label.cex=1.2, 
+       vertex.color="#FFD70099",vertex.frame.color="grey", edge.color="lightgrey", edge.width=0.5,
+       edge.arrow.size=0.6, edge.arrow.width=0.7,
+       main=paste0(length, "x", length," Lattice rewired with beta=",0.05,  "; Average path length = ", round(apl_ws,1) ))
+	   
+distances_ws <- apldc_fn(Kleinberg_small_world)
+#calculating APLDC
+apldc_ws<- mean(distances_ws)
+
+cat("average path length using distributed search of ", length, " by ", length,  " small world (beta = ", 0.05, ") : ", round(apldc_ws, 2))
+
+cat("APLDC/APL values is ",apldc_ws/apl_ws)
+
+```
+

@@ -1,0 +1,579 @@
+---
+title: "WNS_Assignment5"
+author: "Saikrishna_Javvadi"
+date: "21/04/2021"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Using the word association dataset of the University of South Florida, we are supposed to find the word association networks of three words of choice. . A word association network is a network showing the words related to a target word. Later we are supposed to divide the associated words into meaningful communities.
+
+```{r  message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+# Reference : CT5113_assign5.html file provided with Assignment 5
+
+#Using the igraph function 'read_graph' to read the pajek file. It contains both the node and edgelist in one file.
+library(igraph)
+library(ggraph)
+library(data.table)
+library(knitr)
+library(kableExtra)
+library(scales)
+
+g<- read_graph(file="WordPairs.txt",format="pajek")
+g<- as.undirected(g)
+g<-simplify(g)
+
+```
+
+## Displaying few Cue words
+
+```{r  message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#Removed first 4 lines from the cue.txt file
+temp_df <- read.csv(file = "cue.txt",sep=" ",header=F)
+cue_nodes<- temp_df[[1]]
+
+
+for (i in c(1:length(V(g)))) {
+  #adding the cue attributes to the nodes of the graph 
+  vertex_attr(g, "cue", index = V(g)[i]) <-cue_nodes[i]
+}
+
+#Looking at the  cue words to choose three from them for the assignment
+V(g)[which(V(g)$cue==1)]
+```
+
+# PART 1 - WORD ASSOCIATIONS
+
+In this part, I have chosen three words of my choice , those are "PRESENT", "BLACK", "PLUS" to find their association sub-networks using random walk. I choose these words mainly because , they have different meanings in different contexts so I  would get meaningful communities. Also I'm deleting few edges in the graph below a certain weight threshold and with degree 1, the threshold and the number of steps were found using trail and error method .
+
+For the word "PRESENT", I deliberatly choose the randow walk steps to be 2( due to which I had to reduce the weight threshold as well to get more associated words), to visualise the communities with less number of words.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+
+#Reference : random_walk_centrality.r file provided in Week6 lecture materials
+#            CT5113_random_walk.html file provided in Week9 lecture materials
+#Using random walk to look for the word associations of the target word that are present in the neighbourhood around the target word
+rand_walk <- function(g, t,node,n){
+
+  rand_walk<- NULL
+  
+  #running the random walk n times
+  for(i in 1:n){
+     # start a random walk of t steps  at each node and record the path
+    rand_walk<-c(rand_walk,random_walk(g, start= node, steps=t, stuck = "return"))
+  }
+  
+  return(rand_walk)
+}
+```
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#References : CT5113_assign5.html file provided with Assignment 5
+#The function returns a subgraph with word associations and a graph plot for that word showing the visualisation of the association network
+create_subnetwork <- function(graph,weight_threshold,rand_walk_itrs,step_size,word){
+  
+  #any edges below the "weight_threshold" are deleted
+  g <-delete.edges(graph, which(E(graph)$weight < weight_threshold))
+  
+  # make copy of input graph w.r.to given input word
+  g <- induced_subgraph(g, rand_walk(g,step_size,word,rand_walk_itrs))
+  
+  #deleting nodes with degree 1
+  g<-delete.vertices(g,which(degree(g)==1))
+  
+  output_graph<-ggraph(g, layout = "fr") +
+    geom_edge_link2(aes(edge_alpha = weight), edge_width=0.3, show.legend = FALSE) +
+    geom_node_point(aes(size=degree(g)), color = "deepskyblue",  alpha=0.4, show.legend = FALSE) +
+    geom_node_text(aes(label = name), size = 1.75, repel = FALSE) + # repel =TRUE #stops labels overlapping; but also  attaches a segment line between node and text, which may be visually confusing if it overlaps with graph edges and nodes
+    scale_size_area(max_size=10) + 
+    theme_void() 
+  
+  return(list(output_graph,g))
+}
+
+```
+
+## Word associations for the word "PRESENT"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#subgraph and plot for word1
+word1_output <- create_subnetwork(g,0.001,1000,2,"PRESENT")
+word1_output_plot <- word1_output[[1]]
+word1_subnetwork <- word1_output[[2]]
+print(word1_subnetwork)
+word1_output_plot
+```
+
+## Word associations for the word "BLACK"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#subgraph and plot for word2
+word2_output <- create_subnetwork(g,0.065,1000,3,"BLACK")
+word2_output_plot <- word2_output[[1]]
+word2_subnetwork <- word2_output[[2]]
+print(word2_subnetwork)
+word2_output_plot
+```
+
+## Word associations for the word "PLUS"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#subgraph and plot for word3
+word3_output <- create_subnetwork(g,0.045,1000,4,"PLUS")
+word3_output_plot <- word3_output[[1]]
+word3_subnetwork <- word3_output[[2]]
+print(word3_subnetwork)
+word3_output_plot
+```
+
+## Authority measures
+
+Again I have chosen three authority measures which gave me the most meaningful association words for the target word ,after trail and error by trying out all different measures.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#Reference : random_walk_centrality.r file provided in Week6 lecture materials
+
+rand_walk_centrality <- function(g, t){
+  
+  n<-vcount(g)
+  # collects the record of nodes visited
+  rand_walk<- NULL
+  
+  # start a random walk of t steps  at each node and record the path
+  for(i in n){
+    rand_walk<-c(rand_walk,random_walk(g, start= i, steps=t, stuck = "return"))
+  }
+  # frequency table of nodes crossed by random walk
+  w<-table(rand_walk)
+  # converting to a dataframe as it's a easy way to convert data from  table function
+  wdf<-as.data.frame(w)
+  
+  indices<- as.numeric(as.character(wdf[,1]))
+  values<- as.numeric(as.character(wdf[,2]))
+  
+  rand_visits<-rep(0,vcount(g))
+  rand_visits[indices] <-values
+  # scale the raw frequency values to a scale between 0 and 1
+  rand_visits<-rescale(rand_visits)
+  
+  return(rand_visits)
+}
+```
+
+
+```{r  message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#Reference : Centrality Examples file provided in Week6 lecture materials
+authority_measures <- function(graph){
+  
+  #betweenness centrality
+  btns_cent<- betweenness(graph, weights=NA)
+  btns_cent <-c(names(V(graph)[c(order(btns_cent,decreasing = TRUE))][1:3]))
+  
+  #eigen centrality
+  eigen_cent<- eigen_centrality(graph, weights=NA)$vector
+  #choosing three words with highest values for eigen centrality measure 
+  eigen_cent <-c(names(V(graph)[c(order(eigen_cent,decreasing = TRUE))][1:3]))
+  
+  #random walk centrality
+  t=10000
+  rand_walk_cent<-rand_walk_centrality(graph,t)
+  #printing top three words from eigen centrality
+  rand_walk_cent <- c(names(V(graph)[c(order(rand_walk_cent,decreasing = TRUE))][1:3]))
+  
+  return(data.frame("Betweenness"=btns_cent,"Eigen"=eigen_cent,"Random Walk"=rand_walk_cent))
+  
+}
+```
+
+#Three words with highest values for each authority measure for the word "PRESENT"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+word1_auth_measures <- authority_measures(word1_subnetwork)
+
+kable(word1_auth_measures,"latex",caption ="Top 3 words for different authority measures for the word 'PRESENT'")
+
+```
+
+#Three words with highest values for each authority measure for the word "BLACK"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+word2_auth_measures <- authority_measures(word2_subnetwork)
+
+kable(word2_auth_measures,"latex",caption ="Top 3 words for different authority measures for the word 'BLACK'")
+
+```
+
+#Three words with highest values for each authority measure for the word "PLUS"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+word3_auth_measures <- authority_measures(word3_subnetwork)
+
+kable(word3_auth_measures,"latex",caption ="Top 3 words for different authority measures for the word 'PLUS'")
+
+```
+
+# PART 2 - DETERMINE COMMUNITIES
+
+I used the Fast greedy algorithm to determine the communities mainly because it uses modularity maximisation approach to Community Detection and the results shown in the class for the Zachary’s Karate Club dataset among the different algorithms is better for fast greedy than other algorithms.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+#Reference : 2021-Community-Detection-Algorithms.html file provided Week9 lecture materials
+
+colours <- c('#7fc97f','#beaed4','#fdc086','#ffff99','#386cb0','#f0027f','#bf5b17','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928')
+
+#function to determine communities
+det_communities <- function(graph){
+  
+  set.seed(4292)
+  
+  #Using fast greedy algorithm to find the clusters
+  example.fg<- cluster_fast_greedy(graph)
+  
+  # the max modularity found by the algorithm
+  mod_max<- modularity(example.fg)
+  
+  # returns the number of communities at the optimal modularity value of 
+  k_opt<- length(example.fg)
+  
+  lyt <- layout_with_graphopt(graph)
+  par(mar=c(0,0,2,0)+.1)
+  plot(graph,layout = lyt, vertex.color=colours[example.fg$membership], vertex.frame.color="gray", 
+       vertex.label.color="black", vertex.label.cex=0.7, edge.curved=0.2, edge.width=0.4, 
+       main = paste("Fast Greedy \nk = ", k_opt, "; Modularity=", round(mod_max,2)))
+  
+  communities_df <- data.frame("Nodes"=example.fg$names,"Membership"=example.fg$membership)
+
+  communities_list <- NULL
+  for (i in unique(communities_df$Membership)){
+    communities_list[[i]] <- paste(communities_df$Nodes[communities_df$Membership == i], collapse = ' ')
+  }
+
+  community_words <- data.frame(matrix(unlist(communities_list), nrow=length(communities_list), byrow=TRUE))
+  community_words$ID <- seq.int(nrow(community_words))
+  colnames(community_words)[1] <- "community_words"
+  
+  return(community_words[,c(2,1)])
+}
+```
+
+## Communities for the word "PRESENT"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+
+word1_communities <- det_communities(word1_subnetwork)
+
+kable(word1_communities,"latex",caption ="Communities and their association Words for word 'PRESENT'") %>% column_spec(2, width = "10cm")
+
+```
+
+## Interpretation of the communities for word "PRESENT"
+
+1. Anything that's given as reward.
+2. Couldn't understand this community.
+3. different scenarios in which present is used.
+4. Refers to the present/current timeline.
+5. Presents/Gifts given during festivals ( but absent isn't the correct word to be in the community)
+6. Birthday present (should have been combined with the previous community of presents)
+7. Timelines or Tenses.
+
+## Communities for the word "BLACK"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+
+word2_communities <- det_communities(word2_subnetwork)
+
+kable(word2_communities,"latex",caption ="Communities and their association Words for word 'BLACK'") %>% column_spec(2, width = "10cm")
+
+```
+
+## Interpretation of the communities for word "BLACK"
+1. Continents or countries with black/dark skined people.
+2. Related to smoke or objects that are black.
+3. Black animals.
+4. Related to body colours and minorities.
+5. Birds.
+6. Things used to make road . (road is black so objects related to it)
+7. Absence of light in sky at night.
+8. Different colors.
+9. Wicked/Scary stuff.
+10. Running competition
+11. Bias.
+12. Sad/gloomy situations.
+13. Suffering.
+
+## Communities for the word "PLUS"
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE,echo = FALSE}
+
+word3_communities <- det_communities(word3_subnetwork)
+  
+kable(word3_communities,"latex",caption ="Communities and their association Words for word 'PLUS'") %>% column_spec(2, width = "10cm")
+
+```
+
+## Interpretation of the communities for word "PLUS"
+1. Different topics/terms of Mathematics.
+2. Terms related to money.
+3. Mathematical terms.
+4. Synonyms for plus in context of increasing.
+5. Synonyms for combining together(basically addition).
+6. Objects used by children to study
+7. Any award/prize.
+8. Couldn't understand this community.
+9. Mathematical opeartions similar to addition.
+10. Mathematical opeartions, should have been combined with previous community.
+
+# References :
+1. CT5113_assign5.html file provided with Assignment 5
+2. random_walk_centrality.r file provided in Week6 lecture materials.
+3. CT5113_random_walk.html file provided in Week9 lecture materials.
+4. Centrality Examples file provided in Week6 lecture materials.
+5. 2021-Community-Detection-Algorithms.html file provided Week9 lecture materials.
+
+
+# Appendix
+```{r, eval=FALSE}
+
+
+# Reference : CT5113_assign5.html file provided with Assignment 5
+
+#Using the igraph function 'read_graph' to read the pajek file. 
+#It contains both the node and edgelist in one file.
+library(igraph)
+library(ggraph)
+library(data.table)
+library(knitr)
+library(kableExtra)
+library(scales)
+
+g<- read_graph(file="WordPairs.txt",format="pajek")
+g<- as.undirected(g)
+g<-simplify(g)
+
+#Removed first 4 lines from the cue.txt file
+temp_df <- read.csv(file = "cue.txt",sep=" ",header=F)
+cue_nodes<- temp_df[[1]]
+
+
+for (i in c(1:length(V(g)))) {
+  #adding the cue attributes to the nodes of the graph 
+  vertex_attr(g, "cue", index = V(g)[i]) <-cue_nodes[i]
+}
+
+#Looking at the  cue words to choose three from them for the assignment
+V(g)[which(V(g)$cue==1)]
+
+#Reference : random_walk_centrality.r file provided in Week6 lecture materials
+#            CT5113_random_walk.html file provided in Week9 lecture materials
+#Using random walk to look for the word associations of the target word that 
+#are present in the neighbourhood around the target word
+rand_walk <- function(g, t,node,n){
+
+  rand_walk<- NULL
+  
+  #running the random walk n times
+  for(i in 1:n){
+     # start a random walk of t steps  at each node and record the path
+    rand_walk<-c(rand_walk,random_walk(g, start= node, steps=t, stuck = "return"))
+  }
+  
+  return(rand_walk)
+}
+
+#References : CT5113_assign5.html file provided with Assignment 5
+#The function returns a subgraph with word associations and a graph plot for 
+#that word showing the visualisation of the association network
+create_subnetwork <- function(graph,weight_threshold,rand_walk_itrs,step_size,word){
+  
+  #any edges below the "weight_threshold" are deleted
+  g <-delete.edges(graph, which(E(graph)$weight < weight_threshold))
+  
+  # make copy of input graph w.r.to given input word
+  g <- induced_subgraph(g, rand_walk(g,step_size,word,rand_walk_itrs))
+  
+  #deleting nodes with degree 1
+  g<-delete.vertices(g,which(degree(g)==1))
+  
+  output_graph<-ggraph(g, layout = "fr") +
+    geom_edge_link2(aes(edge_alpha = weight), edge_width=0.3, show.legend = FALSE) +
+    geom_node_point(aes(size=degree(g)), color = "deepskyblue",  alpha=0.4, show.legend = FALSE) +
+    geom_node_text(aes(label = name), size = 1.75, repel = FALSE) + 
+    scale_size_area(max_size=10) + 
+    theme_void() 
+  
+  return(list(output_graph,g))
+}
+
+
+#subgraph and plot for word1
+word1_output <- create_subnetwork(g,0.001,1000,2,"PRESENT")
+word1_output_plot <- word1_output[[1]]
+word1_subnetwork <- word1_output[[2]]
+word1_output_plot
+print(word1_subnetwork)
+
+#subgraph and plot for word2
+word2_output <- create_subnetwork(g,0.065,1000,3,"BLACK")
+word2_output_plot <- word2_output[[1]]
+word2_subnetwork <- word2_output[[2]]
+word2_output_plot
+print(word2_subnetwork)
+
+#subgraph and plot for word3
+word3_output <- create_subnetwork(g,0.045,1000,4,"PLUS")
+word3_output_plot <- word3_output[[1]]
+word3_subnetwork <- word3_output[[2]]
+word3_output_plot
+print(word3_subnetwork)
+
+#Reference : random_walk_centrality.r file provided in Week6 lecture materials
+
+rand_walk_centrality <- function(g, t){
+  
+  n<-vcount(g)
+  # collects the record of nodes visited
+  rand_walk<- NULL
+  
+  # start a random walk of t steps  at each node and record the path
+  for(i in n){
+    rand_walk<-c(rand_walk,random_walk(g, start= i, steps=t, stuck = "return"))
+  }
+  # frequency table of nodes crossed by random walk
+  w<-table(rand_walk)
+  # converting to a dataframe as it's a easy way to convert data from  table function
+  wdf<-as.data.frame(w)
+  
+  indices<- as.numeric(as.character(wdf[,1]))
+  values<- as.numeric(as.character(wdf[,2]))
+  
+  rand_visits<-rep(0,vcount(g))
+  rand_visits[indices] <-values
+  # scale the raw frequency values to a scale between 0 and 1
+  rand_visits<-rescale(rand_visits)
+  
+  return(rand_visits)
+}
+
+#Reference : Centrality Examples file provided in Week6 lecture materials
+authority_measures <- function(graph){
+  
+  #betweenness centrality
+  btns_cent<- betweenness(graph, weights=NA)
+  btns_cent <-c(names(V(graph)[c(order(btns_cent,decreasing = TRUE))][1:3]))
+  
+  #eigen centrality
+  eigen_cent<- eigen_centrality(graph, weights=NA)$vector
+  #choosing three words with highest values for eigen centrality measure 
+  eigen_cent <-c(names(V(graph)[c(order(eigen_cent,decreasing = TRUE))][1:3]))
+  
+  #random walk centrality
+  t=10000
+  rand_walk_cent<-rand_walk_centrality(graph,t)
+  #printing top three words from eigen centrality
+  rand_walk_cent <- c(names(V(graph)[c(order(rand_walk_cent,decreasing = TRUE))][1:3]))
+  
+  return(data.frame("Betweenness"=btns_cent,"Eigen"=eigen_cent,"Random Walk"=rand_walk_cent))
+  
+}
+
+#Three words with highest values for each authority measure for the word "PRESENT"
+
+word1_auth_measures <- authority_measures(word1_subnetwork)
+
+kable(word1_auth_measures,"latex",
+      caption ="Top 3 words for different authority measures for the word 'PRESENT'")
+
+#Three words with highest values for each authority measure for the word "BLACK"
+
+word2_auth_measures <- authority_measures(word2_subnetwork)
+
+kable(word2_auth_measures,"latex",
+      caption ="Top 3 words for different authority measures for the word 'BLACK'")
+
+#Three words with highest values for each authority measure for the word "PLUS"
+
+word3_auth_measures <- authority_measures(word3_subnetwork)
+
+kable(word3_auth_measures,"latex",
+      caption ="Top 3 words for different authority measures for the word 'PLUS'")
+
+# PART 2 - DETERMINE COMMUNITIES
+
+#Reference : 2021-Community-Detection-Algorithms.html file provided Week9 lecture materials
+
+colours <- c('#7fc97f','#beaed4','#fdc086','#ffff99','#386cb0',
+             '#f0027f','#bf5b17','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928')
+
+#function to determine communities
+det_communities <- function(graph){
+  
+  set.seed(4292)
+  
+  #Using fast greedy algorithm to find the clusters
+  example.fg<- cluster_fast_greedy(graph)
+  
+  # the max modularity found by the algorithm
+  mod_max<- modularity(example.fg)
+  
+  # returns the number of communities at the optimal modularity value of 
+  k_opt<- length(example.fg)
+  
+  lyt <- layout_with_graphopt(graph)
+  par(mar=c(0,0,2,0)+.1)
+  plot(graph,layout = lyt, vertex.color=colours[example.fg$membership], 
+       vertex.frame.color="gray", vertex.label.color="black", vertex.label.cex=0.7, 
+       edge.curved=0.2, edge.width=0.4, 
+       main = paste("Fast Greedy \nk = ", k_opt, "; Modularity=", round(mod_max,2)))
+  
+  communities_df <- data.frame("Nodes"=example.fg$names,"Membership"=example.fg$membership)
+
+  communities_list <- NULL
+  for (i in unique(communities_df$Membership)){
+    communities_list[[i]] <- paste(communities_df$Nodes[communities_df$Membership == i], 
+                                   collapse = ' ')
+  }
+
+  community_words <- data.frame(matrix(unlist(communities_list), 
+                                       nrow=length(communities_list), byrow=TRUE))
+  community_words$ID <- seq.int(nrow(community_words))
+  colnames(community_words)[1] <- "community_words"
+  
+  return(community_words[,c(2,1)])
+}
+
+## Communities for the word "PRESENT"
+
+word1_communities <- det_communities(word1_subnetwork)
+
+kable(word1_communities,"latex",
+      caption ="Communities and their association Words for word 'PRESENT'") %>% 
+  column_spec(2, width = "10cm")
+
+## Communities for the word "BLACK"
+
+word2_communities <- det_communities(word2_subnetwork)
+
+kable(word2_communities,"latex",
+      caption ="Communities and their association Words for word 'BLACK'") %>% 
+  column_spec(2, width = "10cm")
+
+
+## Communities for the word "PLUS"
+
+word3_communities <- det_communities(word3_subnetwork)
+  
+kable(word3_communities,"latex",
+      caption ="Communities and their association Words for word 'PLUS'") %>%
+  column_spec(2, width = "10cm")
+
+
+```
